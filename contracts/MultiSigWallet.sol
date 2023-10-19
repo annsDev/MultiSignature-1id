@@ -22,8 +22,8 @@ contract MultiSigWallet {
     /// @notice Thrown when msg.sender does not have enough ether
     error NotEnoughEther(uint256 ethValue);
 
-    /// @notice Only deployer is allowed to perform this operation
-    error OnlyDeployerAllowed();
+    /// @notice Only owner is allowed to perform this operation
+    error OnlyOwnerAllowed();
 
     /// @notice Owner already exist
     error OwnerAlreadyExists();
@@ -65,10 +65,10 @@ contract MultiSigWallet {
     address public deployer;
 
     /// @notice Returns the number of required owner confirmations for actions
-    uint public required;
+    uint256 public required;
 
     /// @notice Returns the total count of transactions processed by the contract
-    uint public transactionCount;
+    uint256 public transactionCount;
 
     /// @member destination 'To' address where tokens/ether will be sent
     /// @member value The amount in wei/tokens
@@ -77,7 +77,7 @@ contract MultiSigWallet {
     /// @member expireTime Expiry time of transaction in block.timestamp
     struct Transaction {
         address destination;
-        uint value;
+        uint256 value;
         bytes data;
         bool executed;
         uint256 expireTime;
@@ -85,34 +85,34 @@ contract MultiSigWallet {
 
     /* ========== STORAGE ========== */
 
-    mapping(uint => Transaction) public transactions;
+    mapping(uint256 => Transaction) public transactions;
     mapping(address => bool) public isOwner;
     mapping(address => mapping(address => uint256)) public tokenBalances;
 
     /* ========== EVENTS ========== */
 
-    event Submission(uint indexed transactionId);
-    event Execution(uint indexed transactionId);
+    event Submission(uint256 indexed transactionId);
+    event Execution(uint256 indexed transactionId);
     event ExecutionSuccessful(
-        uint indexed transactionId,
+        uint256 indexed transactionId,
         address to,
         uint256 value
     );
-    event ExecutionFailure(uint indexed transactionId);
-    event Deposit(address indexed sender, uint value);
+    event ExecutionFailure(uint256 indexed transactionId);
+    event Deposit(address indexed sender, uint256 value);
     event Deposited(address from, uint256 value, bytes data);
     event OwnerAddition(address indexed newOwner);
     event OwnerRemoval(address indexed removedOwner);
-    event RequirementChange(uint newThreshold);
+    event RequirementChange(uint256 newThreshold);
     event OwnersLimitUpdated(uint128 maxOwners);
-    event TokenDepositComplete(address tokenAddress, uint tokenAmount);
+    event TokenDepositComplete(address tokenAddress, uint256 tokenAmount);
 
     /* ========== MODIFIERS ========== */
 
-    /// @notice throws exeception when non-deployer tries to call
-    modifier onlyWallet() {
-        if (msg.sender != deployer) {
-            revert OnlyDeployerAllowed();
+    /// @notice throws exeception when non-owner tries to call
+    modifier onlyOwner() {
+        if (!isOwner[msg.sender]) {
+            revert OnlyOwnerAllowed();
         }
         _;
     }
@@ -134,7 +134,7 @@ contract MultiSigWallet {
     }
 
     /// @notice throws exeception when transaction already executed
-    modifier notExecuted(uint _transactionId) {
+    modifier notExecuted(uint256 _transactionId) {
         if (transactions[_transactionId].executed) {
             revert TransactionAlreadyExecuted({transactionId: _transactionId});
         }
@@ -151,9 +151,9 @@ contract MultiSigWallet {
 
     /// @notice validate certain requirements before executing constructor
     modifier validRequirement(
-        uint ownerCount,
+        uint256 ownerCount,
         uint128 _maxOwners,
-        uint _required
+        uint256 _required
     ) {
         require(
             ownerCount <= _maxOwners &&
@@ -166,7 +166,7 @@ contract MultiSigWallet {
     }
 
     /// @notice validate the requirements for managing ownership in a smart contract
-    modifier validCheck(uint ownerCount, uint _required) {
+    modifier validCheck(uint256 ownerCount, uint256 _required) {
         require(
             ownerCount <= max_owner &&
                 _required <= ownerCount &&
@@ -189,25 +189,28 @@ contract MultiSigWallet {
 
     /// @dev Constructor sets initial owners and required number of confirmations
     /// @param _deployer The deployer of the smart contract
-    /// @param _maxOwners Number of max owners that can be added to safe
-    /// @param _required Number of required confirmations
-    /// @param _limit Daily limit in wei/tokens
+    /// @param _maxOwnersLimit Number of max owners that can be added to safe
+    /// @param _threshold Number of required confirmations
+    /// @param _dailyLimit Daily limit in wei/tokens
     /// @param _owners List of initial owners
     constructor(
         address _deployer,
-        uint128 _maxOwners,
-        uint _required,
-        uint256 _limit,
+        uint128 _maxOwnersLimit,
+        uint256 _threshold,
+        uint256 _dailyLimit,
         address[] memory _owners
-    ) validRequirement(_owners.length, _maxOwners, _required) {
+    ) validRequirement(_owners.length + 1, _maxOwnersLimit, _threshold) {
         deployer = _deployer;
-        max_owner = _maxOwners;
-        required = _required;
+        max_owner = _maxOwnersLimit;
+        required = _threshold;
         lastReset = block.timestamp;
-        dailyLimit = _limit;
+        dailyLimit = _dailyLimit;
         spentToday = 0;
 
-        for (uint i = 0; i < _owners.length; i++) {
+        owners.push(deployer);
+        isOwner[deployer] = true;
+
+        for (uint256 i = 0; i < _owners.length; i++) {
             require(
                 !isOwner[_owners[i]] && _owners[i] != address(0),
                 "Provided address is either owner or null"
@@ -243,10 +246,6 @@ contract MultiSigWallet {
     /// @param tokenAddress Contract address of ERC20 token
     /// @param amount The ERC20 token amount to deposit
     function depositToken(address tokenAddress, uint256 amount) external {
-        // require(
-        //     IERC20(tokenAddress).balanceOf(msg.sender) >= amount,
-        //     "Insufficient Balance For Tokens Transfer!"
-        // );
         require(
             IERC20(tokenAddress).allowance(msg.sender, address(this)) > 0,
             "Insufficient Token Allowance!"
@@ -262,9 +261,12 @@ contract MultiSigWallet {
 
     /// @notice Get the balance of an ERC20 token held by the contract
     /// @param _tokenAddress Contract address of ERC20 token
-    function tokenBalance(
-        address _tokenAddress
-    ) public view notNull(_tokenAddress) returns (uint256 _tokenBalance) {
+    function tokenBalance(address _tokenAddress)
+        public
+        view
+        notNull(_tokenAddress)
+        returns (uint256 _tokenBalance)
+    {
         return IERC20(_tokenAddress).balanceOf(address(this));
     }
 
@@ -275,9 +277,11 @@ contract MultiSigWallet {
 
     /// @notice Update the daily spending limit
     /// @param newLimit Daily limit in wei/tokens
-    function updateDailyLimit(
-        uint256 newLimit
-    ) public onlyWallet ownerExists(msg.sender) {
+    function updateDailyLimit(uint256 newLimit)
+        public
+        onlyOwner
+        ownerExists(msg.sender)
+    {
         spentToday = 0;
         dailyLimit = newLimit;
 
@@ -286,7 +290,7 @@ contract MultiSigWallet {
 
     /// @notice Allows to update the limit of max number of owners
     /// @param _maxNumberOfOwners Max number of owners
-    function updateMaxOwnerLimit(uint128 _maxNumberOfOwners) public onlyWallet {
+    function updateMaxOwnerLimit(uint128 _maxNumberOfOwners) public onlyOwner {
         if (_maxNumberOfOwners >= owners.length) {
             max_owner = _maxNumberOfOwners;
             emit OwnersLimitUpdated({maxOwners: _maxNumberOfOwners});
@@ -295,9 +299,12 @@ contract MultiSigWallet {
 
     /// @notice Allows to add a new owner
     /// @param owner Address of new owner
-    function addOwner(
-        address owner
-    ) public onlyWallet notNull(owner) ownerDoesNotExist(owner) {
+    function addOwner(address owner)
+        public
+        onlyOwner
+        notNull(owner)
+        ownerDoesNotExist(owner)
+    {
         require(
             owners.length <= max_owner,
             "Maximum limit reached for owners!"
@@ -309,11 +316,11 @@ contract MultiSigWallet {
 
     /// @notice Allows to remove an owner
     /// @param owner Address of owner
-    function removeOwner(address owner) public onlyWallet ownerExists(owner) {
+    function removeOwner(address owner) public onlyOwner ownerExists(owner) {
         require(owners.length > 1, "Cannot remove the last owner");
         isOwner[owner] = false;
-        
-        for (uint i = 0; i < owners.length; i++) {
+
+        for (uint256 i = 0; i < owners.length; i++) {
             if (owners[i] == owner) {
                 owners[i] = owners[owners.length - 1];
                 owners.pop();
@@ -321,22 +328,23 @@ contract MultiSigWallet {
             }
         }
 
-    if (required > owners.length) {
-        changeRequirement(owners.length);
-    }
-    
-    emit OwnerRemoval({removedOwner: owner});
-    }
+        if (required > owners.length) {
+            changeRequirement(owners.length);
+        }
 
+        emit OwnerRemoval({removedOwner: owner});
+    }
 
     /// @notice Allows to replace an owner with a new owner
     /// @param owner Address of owner to be replaced
     /// @param newOwner Address of new owner
-    function replaceOwner(
-        address owner,
-        address newOwner
-    ) public onlyWallet ownerExists(owner) ownerDoesNotExist(newOwner) {
-        for (uint i = 0; i < owners.length; i++)
+    function replaceOwner(address owner, address newOwner)
+        public
+        onlyOwner
+        ownerExists(owner)
+        ownerDoesNotExist(newOwner)
+    {
+        for (uint256 i = 0; i < owners.length; i++)
             if (owners[i] == owner) {
                 owners[i] = newOwner;
                 break;
@@ -349,9 +357,11 @@ contract MultiSigWallet {
 
     /// @notice Allows to change the number of required confirmations
     /// @param _required Number of required confirmations
-    function changeRequirement(
-        uint _required
-    ) public onlyWallet validCheck(owners.length, _required) {
+    function changeRequirement(uint256 _required)
+        public
+        onlyOwner
+        validCheck(owners.length, _required)
+    {
         required = _required;
         emit RequirementChange({newThreshold: _required});
     }
@@ -363,11 +373,11 @@ contract MultiSigWallet {
     /// @return transactionId transaction ID
     function submitTransaction(
         address destination,
-        uint value,
+        uint256 value,
         bytes memory data,
         uint256 _expireTime
-    ) public ownerExists(msg.sender) returns (uint transactionId) {
-        if (_expireTime + block.timestamp <= block.timestamp) {
+    ) public ownerExists(msg.sender) returns (uint256 transactionId) {
+        if (_expireTime <= block.timestamp) {
             revert InvalidBlockTimeStamp();
         }
         transactionId = addTransaction(destination, value, data, _expireTime);
@@ -380,17 +390,17 @@ contract MultiSigWallet {
     /// @return transactionId Returns the transaction ID
     function addTransaction(
         address destination,
-        uint value,
+        uint256 value,
         bytes memory data,
         uint256 _expireTime
-    ) internal notNull(destination) returns (uint transactionId) {
+    ) internal notNull(destination) returns (uint256 transactionId) {
         transactionId = transactionCount;
         transactions[transactionId] = Transaction({
             destination: destination,
             value: value,
             data: data,
             executed: false,
-            expireTime: block.timestamp + _expireTime
+            expireTime: _expireTime
         });
         transactionCount += 1;
         emit Submission({transactionId: transactionId});
@@ -491,11 +501,12 @@ contract MultiSigWallet {
     /// @param pending Include pending transactions
     /// @param executed Include executed transactions
     /// @return count Total number of transactions after filters are applied
-    function getTransactionCount(
-        bool pending,
-        bool executed
-    ) public view returns (uint count) {
-        for (uint i = 0; i < transactionCount; i++)
+    function getTransactionCount(bool pending, bool executed)
+        public
+        view
+        returns (uint256 count)
+    {
+        for (uint256 i = 0; i < transactionCount; i++)
             if (
                 (pending && !transactions[i].executed) ||
                 (executed && transactions[i].executed)
@@ -515,14 +526,14 @@ contract MultiSigWallet {
     /// @param executed Include executed transactions
     /// @return _transactionIds array of transaction IDs
     function getTransactionIds(
-        uint from,
-        uint to,
+        uint256 from,
+        uint256 to,
         bool pending,
         bool executed
-    ) public view returns (uint[] memory _transactionIds) {
-        uint[] memory transactionIdsTemp = new uint[](transactionCount);
-        uint count = 0;
-        uint i;
+    ) public view returns (uint256[] memory _transactionIds) {
+        uint256[] memory transactionIdsTemp = new uint256[](transactionCount);
+        uint256 count = 0;
+        uint256 i;
         for (i = 0; i < transactionCount; i++)
             if (
                 (pending && !transactions[i].executed) ||
@@ -531,7 +542,7 @@ contract MultiSigWallet {
                 transactionIdsTemp[count] = i;
                 count += 1;
             }
-        _transactionIds = new uint[](to - from);
+        _transactionIds = new uint256[](to - from);
         for (i = from; i < to; i++)
             _transactionIds[i - from] = transactionIdsTemp[i];
     }
