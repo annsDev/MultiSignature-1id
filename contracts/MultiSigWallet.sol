@@ -282,6 +282,7 @@ contract MultiSigWallet {
         onlyOwner
         ownerExists(msg.sender)
     {
+        require(newLimit > 0, "Limit can not be zero");
         spentToday = 0;
         dailyLimit = newLimit;
 
