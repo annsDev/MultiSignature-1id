@@ -2,7 +2,7 @@
 pragma solidity ^0.8.10;
 
 /// @title MultiSignature Contract
-/// @author 1id
+/// @author Anns Khalid
 /// @notice Implements the logic for MultiSignature Contract
 /// @dev Allows multiple parties to agree on transactions before execution
 
