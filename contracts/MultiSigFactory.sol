@@ -2,7 +2,7 @@
 pragma solidity ^0.8.10;
 
 /// @title MultiSignature Factory Contract
-/// @author 1id-Factory
+/// @author Anns Khalid
 /// @notice Implements the logic for MultiSignature Factory Contract
 /// @dev Allows users to deploy new multisig contract
 
